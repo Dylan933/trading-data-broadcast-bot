@@ -1,0 +1,31 @@
+name: Market Broadcast Hourly
+
+on:
+  schedule:
+    - cron: '0 * * * *' # 每小时运行一次（UTC）
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run hourly broadcast
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+          SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}
+          TONE: ${{ vars.TONE || 'aggressive' }}
+        run: |
+          python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once --webhook "$WECHAT_WEBHOOK_URL"
