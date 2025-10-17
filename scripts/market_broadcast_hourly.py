@@ -424,7 +424,70 @@ def send_wecom_markdown(webhook_url: str, content: str):
         print(f"[ERROR] WeCom push error: {e}")
 
 
-def run_once(symbols: List[str], webhook_url: str | None = None, tone: str = "balanced", html_out: str | None = None):
+def send_lark_message(webhook_url: str, content: str):
+    """
+    发送消息到Lark（飞书）机器人
+    支持富文本格式，包含标题和内容
+    """
+    try:
+        # 将markdown内容转换为飞书富文本格式
+        lines = content.split('\n')
+        title = "交易数据播报"
+        
+        # 构建飞书富文本消息格式
+        post_content = []
+        for line in lines:
+            if line.strip():
+                # 处理加粗文本 **text** -> 飞书格式
+                if '**' in line:
+                    parts = []
+                    segments = line.split('**')
+                    for i, segment in enumerate(segments):
+                        if i % 2 == 0:  # 普通文本
+                            if segment:
+                                parts.append({"tag": "text", "text": segment})
+                        else:  # 加粗文本
+                            if segment:
+                                parts.append({"tag": "text", "text": segment, "style": ["bold"]})
+                    if parts:
+                        post_content.append(parts)
+                else:
+                    # 普通文本行
+                    post_content.append([{"tag": "text", "text": line}])
+        
+        # 构建飞书消息体
+        lark_msg = {
+            "msg_type": "post",
+            "content": {
+                "post": {
+                    "zh_cn": {
+                        "title": title,
+                        "content": post_content
+                    }
+                }
+            }
+        }
+        
+        resp = requests.post(
+            webhook_url,
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(lark_msg, ensure_ascii=False),
+            timeout=10,
+        )
+        
+        if resp.status_code != 200:
+            print(f"[WARN] Lark push failed: status={resp.status_code}, body={resp.text}")
+        else:
+            result = resp.json()
+            if result.get("code") == 0:
+                print("[INFO] Lark push sent.")
+            else:
+                print(f"[WARN] Lark push failed: code={result.get('code')}, msg={result.get('msg')}")
+    except Exception as e:
+        print(f"[ERROR] Lark push error: {e}")
+
+
+def run_once(symbols: List[str], webhook_url: str | None = None, lark_webhook_url: str | None = None, tone: str = "balanced", html_out: str | None = None):
     messages = []
     data_map: Dict[str, Dict[str, List[float]]] = {}
     fut_map: Dict[str, Dict[str, List[float]]] = {}
@@ -449,76 +512,96 @@ def run_once(symbols: List[str], webhook_url: str | None = None, tone: str = "ba
             print(f"[ERROR] format {sym}: {e}")
     # Hemisphere-based additions at 12:00 and 00:00 (UTC+8)
     now_cn = datetime.now(timezone(timedelta(hours=8)))
-    if now_cn.hour in [12, 0]:  # 12:00 (Eastern) and 00:00 (Western)
-        hemisphere = "东半球" if now_cn.hour == 12 else "西半球"
-        time_range = "12:00-00:00" if now_cn.hour == 12 else "00:00-12:00"
-        
-        # Calculate hemisphere trading volume and volatility for BTC and ETH
-        hemisphere_symbols = ["BTCUSDT", "ETHUSDT"]
-        for sym in hemisphere_symbols:
-            if sym in symbols and sym in data_map and sym in fut_map:
-                try:
-                    # Get 12-hour data (half day)
-                    spot_data = data_map[sym]
-                    fut_data = fut_map[sym]
-                    
-                    # 12-hour volume (last 12 hours)
-                    spot_vol_12h = sum_last_n(spot_data.get("quote_volumes", []), 12)
-                    fut_vol_12h = sum_last_n(fut_data.get("quote_volumes", []), 12)
-                    
-                    # 12-hour volatility calculation (standard deviation of returns)
-                    closes = spot_data.get("closes", [])
-                    if len(closes) >= 13:  # Need at least 13 points for 12 returns
-                        returns = [(closes[i] / closes[i-1] - 1) * 100 for i in range(-12, 0)]
-                        volatility = (sum([(r - sum(returns)/len(returns))**2 for r in returns]) / len(returns))**0.5
-                    else:
-                        volatility = 0.0
-                    
-                    vol_line = f"{hemisphere}时段（{time_range} UTC+8）{sym.replace('USDT', '')}合约数据：交易量≈${fut_vol_12h:,.0f}；波动率{volatility:.2f}%"
-                    print(vol_line)
-                    messages.append(vol_line)
-                except Exception as e:
-                    print(f"[ERROR] hemisphere data {sym}: {e}")
-        
-        # Fear & Greed Index (keep at both times)
-        fgi = fetch_fear_greed_index()
-        if fgi:
-            fgi_line = f"恐惧贪婪指数：{fgi['value']}（{fgi['classification']}，更新于 {fgi['updated']}）"
-        else:
-            fgi_line = "恐惧贪婪指数：数据源不可用"
-        print(fgi_line)
-        messages.append(fgi_line)
-        
-        # Relative strength section at both hemisphere times
-        pairs: List[Tuple[str, str]] = []
-        symset = set(symbols)
-        # ETH/BTC and BNB/ETH
-        if {"ETHUSDT", "BTCUSDT"}.issubset(symset):
-            pairs.append(("ETHUSDT", "BTCUSDT"))
-        if {"BNBUSDT", "ETHUSDT"}.issubset(symset):
-            pairs.append(("BNBUSDT", "ETHUSDT"))
-        if pairs:
+    if now_cn.hour in [12, 0]:
+        try:
+            # Determine hemisphere period
+            if now_cn.hour == 12:
+                period_desc = "东半球时段（12:00-00:00 UTC+8）"
+                start_hour = 12
+            else:  # 00:00
+                period_desc = "西半球时段（00:00-12:00 UTC+8）"
+                start_hour = 0
+            
+            # Add BTC and ETH contract volume and volatility
+            for base_symbol in ["BTC", "ETH"]:
+                symbol = f"{base_symbol}USDT"
+                if symbol in data_map:
+                    try:
+                        # Calculate 12-hour volume and volatility
+                        data = data_map[symbol]
+                        if len(data) >= 12:
+                            # Get last 12 hours of data
+                            recent_data = data[-12:]
+                            
+                            # Calculate volume (sum of volumes)
+                            volume_12h = sum(candle[5] for candle in recent_data)  # Volume is index 5
+                            
+                            # Calculate volatility (standard deviation of returns)
+                            prices = [float(candle[4]) for candle in recent_data]  # Close prices
+                            if len(prices) > 1:
+                                returns = [(prices[i] / prices[i-1] - 1) for i in range(1, len(prices))]
+                                volatility = (sum(r**2 for r in returns) / len(returns)) ** 0.5 * 100
+                            else:
+                                volatility = 0
+                            
+                            hemisphere_msg = f"{period_desc}{base_symbol}合约数据：交易量≈${volume_12h:,.0f}；波动率{volatility:.2f}%"
+                            messages.append(hemisphere_msg)
+                            print(hemisphere_msg)
+                    except Exception as e:
+                        print(f"[ERROR] hemisphere data for {base_symbol}: {e}")
+            
+            # Add Fear & Greed Index and relative strength analysis
             try:
-                rs_text = relative_strength_report(pairs, data_map)
-                print(rs_text)
-                messages.append(rs_text)
+                fear_greed = fetch_fear_greed_index()
+                if fear_greed:
+                    fgi_line = f"恐惧贪婪指数：{fear_greed['value']}（{fear_greed['classification']}，更新于 {fear_greed['updated']}）"
+                    messages.append(fgi_line)
+                    print(fgi_line)
             except Exception as e:
-                print(f"[ERROR] relative strength: {e}")
-    # Aggregate, write HTML, and push to WeCom if configured
+                print(f"[ERROR] fear_greed: {e}")
+            
+            try:
+                # Relative strength analysis
+                pairs: List[Tuple[str, str]] = []
+                symset = set(symbols)
+                # ETH/BTC and BNB/ETH
+                if {"ETHUSDT", "BTCUSDT"}.issubset(symset):
+                    pairs.append(("ETHUSDT", "BTCUSDT"))
+                if {"BNBUSDT", "ETHUSDT"}.issubset(symset):
+                    pairs.append(("BNBUSDT", "ETHUSDT"))
+                if pairs:
+                    relative_strength = relative_strength_report(pairs, data_map)
+                    if relative_strength:
+                        messages.append(relative_strength)
+                        print(relative_strength)
+            except Exception as e:
+                print(f"[ERROR] relative_strength: {e}")
+        except Exception as e:
+            print(f"[ERROR] hemisphere additions: {e}")
+    
+    # Aggregate, write HTML, and push to webhooks if configured
     now_cn_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M')
     write_html(messages, now_cn_str, html_out)
-    if webhook_url:
+    
+    if webhook_url or lark_webhook_url:
         content = f"**市场播报（{now_cn_str}）**\n\n" + "\n\n".join(messages)
-        send_wecom_markdown(webhook_url, content)
+        
+        # Send to WeChat if configured
+        if webhook_url:
+            send_wecom_markdown(webhook_url, content)
+        
+        # Send to Lark if configured
+        if lark_webhook_url:
+            send_lark_message(lark_webhook_url, content)
 
 
-def run_hourly(symbols: List[str], webhook_url: str | None = None, tone: str = "balanced", html_out: str | None = None):
+def run_hourly(symbols: List[str], webhook_url: str | None = None, lark_webhook_url: str | None = None, tone: str = "balanced", html_out: str | None = None):
     # Initial run immediately, then align to next hour, then hourly
-    run_once(symbols, webhook_url, tone, html_out)
+    run_once(symbols, webhook_url, lark_webhook_url, tone, html_out)
     while True:
         try:
             sleep_until_next_hour()
-            run_once(symbols, webhook_url, tone, html_out)
+            run_once(symbols, webhook_url, lark_webhook_url, tone, html_out)
         except KeyboardInterrupt:
             print("[INFO] Stopped by user.")
             break
@@ -543,6 +626,12 @@ def main():
         help="WeCom (企业微信群机器人) webhook URL to push markdown messages",
     )
     parser.add_argument(
+        "--lark-webhook",
+        type=str,
+        default=os.environ.get("LARK_WEBHOOK_URL"),
+        help="Lark (飞书群机器人) webhook URL to push rich text messages",
+    )
+    parser.add_argument(
         "--tone",
         type=str,
         choices=["conservative", "balanced", "aggressive"],
@@ -559,9 +648,9 @@ def main():
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
 
     if args.once:
-        run_once(symbols, args.webhook, tone=args.tone, html_out=args.html_out)
+        run_once(symbols, args.webhook, args.lark_webhook, tone=args.tone, html_out=args.html_out)
     else:
-        run_hourly(symbols, args.webhook, tone=args.tone, html_out=args.html_out)
+        run_hourly(symbols, args.webhook, args.lark_webhook, tone=args.tone, html_out=args.html_out)
 
 
 if __name__ == "__main__":
