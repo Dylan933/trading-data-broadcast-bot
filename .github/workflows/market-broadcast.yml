@@ -25,7 +25,10 @@ jobs:
       - name: Run hourly broadcast
         env:
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
           SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}
           TONE: ${{ vars.TONE || 'aggressive' }}
         run: |
-          python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once --webhook "$WECHAT_WEBHOOK_URL"
+          python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once \
+            ${WECHAT_WEBHOOK_URL:+--webhook "$WECHAT_WEBHOOK_URL"} \
+            ${LARK_WEBHOOK_URL:+--lark-webhook "$LARK_WEBHOOK_URL"}
