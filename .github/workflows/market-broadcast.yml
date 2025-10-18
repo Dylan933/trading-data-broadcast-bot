@@ -2,9 +2,11 @@ name: Market Broadcast Hourly
 
 on:
   schedule:
-    # 每小时整点播报（UTC时间）
-    # UTC 00分 = 北京时间 08分（UTC+8）
-    - cron: '0 * * * *'
+    # 每小时整点播报，尽可能接近北京时间整点
+    # UTC时间需要减去8小时来对应北京时间整点
+    - cron: '52 * * * *'  # UTC 52分 = 北京时间下一小时 00分
+    - cron: '53 * * * *'  # UTC 53分 = 北京时间下一小时 01分（备用）
+    - cron: '54 * * * *'  # UTC 54分 = 北京时间下一小时 02分（备用）
   workflow_dispatch:
 
 jobs:
