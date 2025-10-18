@@ -51,6 +51,13 @@ jobs:
           echo "  SYMBOLS: $SYMBOLS"
           echo "  TONE: $TONE"
           
+          # 测试Lark webhook连接性
+          if [ -n "$LARK_WEBHOOK_URL" ]; then
+            echo "Testing Lark webhook connectivity..."
+            python test_lark_github.py
+          fi
+          
+          echo "Running main broadcast script..."
           python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once \
             ${WECHAT_WEBHOOK_URL:+--webhook "$WECHAT_WEBHOOK_URL"} \
             ${LARK_WEBHOOK_URL:+--lark-webhook "$LARK_WEBHOOK_URL"}

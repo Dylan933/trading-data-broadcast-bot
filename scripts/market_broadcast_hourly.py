@@ -430,48 +430,18 @@ def send_lark_message(webhook_url: str, content: str):
     支持富文本格式，包含标题和内容
     """
     try:
-        # 将markdown内容转换为飞书富文本格式
-        lines = content.split('\n')
-        title = "交易数据播报"
-        
-        # 构建飞书富文本消息格式
-        post_content = []
-        for line in lines:
-            if line.strip():
-                # 处理加粗文本 **text** -> 飞书格式
-                if '**' in line:
-                    parts = []
-                    segments = line.split('**')
-                    for i, segment in enumerate(segments):
-                        if i % 2 == 0:  # 普通文本
-                            if segment:
-                                parts.append({"tag": "text", "text": segment})
-                        else:  # 加粗文本
-                            if segment:
-                                parts.append({"tag": "text", "text": segment, "style": ["bold"]})
-                    if parts:
-                        post_content.append(parts)
-                else:
-                    # 普通文本行
-                    post_content.append([{"tag": "text", "text": line}])
-        
-        # 构建飞书消息体
-        lark_msg = {
-            "msg_type": "post",
+        # 先尝试发送简单文本消息，避免富文本格式问题
+        simple_msg = {
+            "msg_type": "text",
             "content": {
-                "post": {
-                    "zh_cn": {
-                        "title": title,
-                        "content": post_content
-                    }
-                }
+                "text": content
             }
         }
         
         resp = requests.post(
             webhook_url,
             headers={"Content-Type": "application/json"},
-            data=json.dumps(lark_msg, ensure_ascii=False),
+            data=json.dumps(simple_msg, ensure_ascii=False),
             timeout=10,
         )
         
