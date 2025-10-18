@@ -29,6 +29,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug environment variables
+        run: |
+          echo "LARK_WEBHOOK_URL is set: ${{ secrets.LARK_WEBHOOK_URL != '' }}"
+          echo "WECHAT_WEBHOOK_URL is set: ${{ secrets.WECHAT_WEBHOOK_URL != '' }}"
+          echo "SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}"
+          echo "TONE: ${{ vars.TONE || 'aggressive' }}"
+
       - name: Run hourly broadcast
         env:
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
@@ -36,6 +43,8 @@ jobs:
           SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}
           TONE: ${{ vars.TONE || 'aggressive' }}
         run: |
+          echo "Starting market broadcast..."
           python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once \
             ${WECHAT_WEBHOOK_URL:+--webhook "$WECHAT_WEBHOOK_URL"} \
             ${LARK_WEBHOOK_URL:+--lark-webhook "$LARK_WEBHOOK_URL"}
+          echo "Market broadcast completed."
