@@ -2,11 +2,14 @@ name: Market Broadcast Hourly
 
 on:
   schedule:
-    # 每小时的第2分钟执行，避开整点高峰期（UTC时间）
-    # 对应北京时间每小时的第2分钟（UTC+8）
+    # 每小时的第2分钟执行（UTC时间）
+    # UTC 02分 = 北京时间 10分（UTC+8）
     - cron: '2 * * * *'
-    # 备用时间：每小时的第7分钟，防止第一次失败
+    # 备用时间：每小时的第7分钟（UTC时间）
+    # UTC 07分 = 北京时间 15分（UTC+8）
     - cron: '7 * * * *'
+    # 额外增加一个时间点，确保执行稳定性
+    - cron: '12 * * * *'
   workflow_dispatch:
 
 jobs:
