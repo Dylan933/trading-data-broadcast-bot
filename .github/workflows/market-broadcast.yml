@@ -30,6 +30,12 @@ jobs:
           echo "WECHAT_WEBHOOK_URL is set: ${{ secrets.WECHAT_WEBHOOK_URL != '' }}"
           echo "SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}"
           echo "TONE: ${{ vars.TONE || 'aggressive' }}"
+          if [ -n "${{ secrets.LARK_WEBHOOK_URL }}" ]; then
+            echo "LARK_WEBHOOK_URL length: ${#LARK_WEBHOOK_URL}"
+            echo "LARK_WEBHOOK_URL starts with: ${LARK_WEBHOOK_URL:0:30}..."
+          else
+            echo "❌ LARK_WEBHOOK_URL is empty or not set!"
+          fi
 
       - name: Run hourly broadcast
         env:
@@ -39,6 +45,12 @@ jobs:
           TONE: ${{ vars.TONE || 'aggressive' }}
         run: |
           echo "Starting market broadcast..."
+          echo "Environment check:"
+          echo "  LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:+SET}${LARK_WEBHOOK_URL:-NOT_SET}"
+          echo "  WECHAT_WEBHOOK_URL: ${WECHAT_WEBHOOK_URL:+SET}${WECHAT_WEBHOOK_URL:-NOT_SET}"
+          echo "  SYMBOLS: $SYMBOLS"
+          echo "  TONE: $TONE"
+          
           python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once \
             ${WECHAT_WEBHOOK_URL:+--webhook "$WECHAT_WEBHOOK_URL"} \
             ${LARK_WEBHOOK_URL:+--lark-webhook "$LARK_WEBHOOK_URL"}
