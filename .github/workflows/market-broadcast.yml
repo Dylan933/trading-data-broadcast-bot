@@ -2,7 +2,7 @@ name: Market Broadcast Hourly
 
 on:
   schedule:
-    # 新加坡时间整点播报（UTC+8，与北京时间相同）
+    # UTC+8时区整点播报（北京时间）
     # 每小时整点运行一次
     - cron: '0 * * * *'  # 每小时的0分钟运行
   workflow_dispatch:
@@ -27,9 +27,7 @@ jobs:
       - name: Debug environment variables
         run: |
           echo "LARK_WEBHOOK_URL is set: ${{ secrets.LARK_WEBHOOK_URL != '' }}"
-          echo "WECHAT_WEBHOOK_URL is set: ${{ secrets.WECHAT_WEBHOOK_URL != '' }}"
           echo "SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}"
-          echo "TONE: ${{ vars.TONE || 'aggressive' }}"
           if [ -n "${{ secrets.LARK_WEBHOOK_URL }}" ]; then
             echo "LARK_WEBHOOK_URL length: ${#LARK_WEBHOOK_URL}"
             echo "LARK_WEBHOOK_URL starts with: ${LARK_WEBHOOK_URL:0:30}..."
@@ -39,17 +37,13 @@ jobs:
 
       - name: Run hourly broadcast
         env:
-          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
           SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}
-          TONE: ${{ vars.TONE || 'aggressive' }}
         run: |
           echo "Starting market broadcast..."
           echo "Environment check:"
           echo "  LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:+SET}${LARK_WEBHOOK_URL:-NOT_SET}"
-          echo "  WECHAT_WEBHOOK_URL: ${WECHAT_WEBHOOK_URL:+SET}${WECHAT_WEBHOOK_URL:-NOT_SET}"
           echo "  SYMBOLS: $SYMBOLS"
-          echo "  TONE: $TONE"
           
           # 测试Lark webhook连接性
           if [ -n "$LARK_WEBHOOK_URL" ]; then
@@ -58,7 +52,5 @@ jobs:
           fi
           
           echo "Running main broadcast script..."
-          python scripts/market_broadcast_hourly.py --symbols "$SYMBOLS" --tone "$TONE" --once \
-            ${WECHAT_WEBHOOK_URL:+--webhook "$WECHAT_WEBHOOK_URL"} \
-            ${LARK_WEBHOOK_URL:+--lark-webhook "$LARK_WEBHOOK_URL"}
+          python scripts/market_broadcast_hourly_v2.py --symbols "$SYMBOLS" --once --lark-webhook "$LARK_WEBHOOK_URL"
           echo "Market broadcast completed."
