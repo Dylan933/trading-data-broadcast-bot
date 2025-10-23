@@ -341,7 +341,39 @@ def send_lark_message(webhook_url: str, content: str):
         print(f"[ERROR] 飞书推送异常: {e}")
 
 
-def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None):
+def send_telegram_message(bot_token: str, chat_id: str, content: str):
+    """发送消息到Telegram机器人"""
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        
+        # 将内容转换为HTML格式，保持基本格式
+        html_content = content.replace('**', '<b>').replace('**', '</b>')
+        # 修复HTML标签配对问题
+        html_content = html_content.replace('<b>', '<b>').replace('<b>', '</b>')
+        
+        payload = {
+            "chat_id": chat_id,
+            "text": html_content,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
+        
+        resp = requests.post(url, json=payload, timeout=10)
+        
+        if resp.status_code != 200:
+            print(f"[ERROR] Telegram推送失败: status={resp.status_code}, body={resp.text}")
+        else:
+            result = resp.json()
+            if result.get("ok") is True:
+                print("[INFO] Telegram推送成功")
+            else:
+                print(f"[ERROR] Telegram推送失败: {result}")
+                
+    except Exception as e:
+        print(f"[ERROR] Telegram推送异常: {e}")
+
+
+def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None, telegram_bot_token: str | None = None, telegram_chat_id: str | None = None):
     """执行一次播报"""
     try:
         print(f"[INFO] 开始播报 - {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} UTC+8")
@@ -433,6 +465,15 @@ def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None):
             except Exception as e:
                 print(f"[ERROR] 飞书推送失败: {e}")
         
+        # 发送到Telegram
+        if telegram_bot_token and telegram_chat_id and messages:
+            try:
+                now_str = now_cn.strftime('%Y-%m-%d %H:%M')
+                content = f"🕐 市场播报 ({now_str} UTC+8)\n\n" + "\n\n".join(messages)
+                send_telegram_message(telegram_bot_token, telegram_chat_id, content)
+            except Exception as e:
+                print(f"[ERROR] Telegram推送失败: {e}")
+        
         print("[INFO] 播报完成")
         
     except Exception as e:
@@ -464,6 +505,18 @@ def main():
         default=os.environ.get("LARK_WEBHOOK_URL"),
         help="飞书机器人Webhook URL",
     )
+    parser.add_argument(
+        "--telegram-bot-token",
+        type=str,
+        default=os.environ.get("TELEGRAM_BOT_TOKEN"),
+        help="Telegram机器人Token",
+    )
+    parser.add_argument(
+        "--telegram-chat-id",
+        type=str,
+        default=os.environ.get("TELEGRAM_CHAT_ID"),
+        help="Telegram聊天ID",
+    )
     
     args = parser.parse_args()
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
@@ -471,16 +524,17 @@ def main():
     print(f"[INFO] 动量数据播报机器人启动")
     print(f"[INFO] 监控交易对: {', '.join(symbols)}")
     print(f"[INFO] 飞书推送: {'已配置' if args.lark_webhook else '未配置'}")
+    print(f"[INFO] Telegram推送: {'已配置' if args.telegram_bot_token and args.telegram_chat_id else '未配置'}")
     
     if args.once:
-        run_broadcast(symbols, args.lark_webhook)
+        run_broadcast(symbols, args.lark_webhook, args.telegram_bot_token, args.telegram_chat_id)
     else:
         # 立即执行一次，然后每小时执行
-        run_broadcast(symbols, args.lark_webhook)
+        run_broadcast(symbols, args.lark_webhook, args.telegram_bot_token, args.telegram_chat_id)
         while True:
             try:
                 sleep_until_next_hour()
-                run_broadcast(symbols, args.lark_webhook)
+                run_broadcast(symbols, args.lark_webhook, args.telegram_bot_token, args.telegram_chat_id)
             except KeyboardInterrupt:
                 print("[INFO] 用户中断，程序退出")
                 break

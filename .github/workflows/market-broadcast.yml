@@ -27,30 +27,17 @@ jobs:
       - name: Debug environment variables
         run: |
           echo "LARK_WEBHOOK_URL is set: ${{ secrets.LARK_WEBHOOK_URL != '' }}"
-          echo "SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}"
-          if [ -n "${{ secrets.LARK_WEBHOOK_URL }}" ]; then
-            echo "LARK_WEBHOOK_URL length: ${#LARK_WEBHOOK_URL}"
-            echo "LARK_WEBHOOK_URL starts with: ${LARK_WEBHOOK_URL:0:30}..."
-          else
-            echo "❌ LARK_WEBHOOK_URL is empty or not set!"
-          fi
-
+          echo "SYMBOLS: ${{ env.SYMBOLS }}"
+          
       - name: Run hourly broadcast
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT' }}
+          SYMBOLS: ${{ secrets.SYMBOLS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "Starting market broadcast..."
-          echo "Environment check:"
-          echo "  LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:+SET}${LARK_WEBHOOK_URL:-NOT_SET}"
-          echo "  SYMBOLS: $SYMBOLS"
-          
-          # 测试Lark webhook连接性
-          if [ -n "$LARK_WEBHOOK_URL" ]; then
-            echo "Testing Lark webhook connectivity..."
-            python test_lark_github.py
-          fi
-          
-          echo "Running main broadcast script..."
-          python scripts/market_broadcast_hourly_v2.py --symbols "$SYMBOLS" --once --lark-webhook "$LARK_WEBHOOK_URL"
-          echo "Market broadcast completed."
+          echo "LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:0:20}..."
+          echo "SYMBOLS: $SYMBOLS"
+          echo "TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:0:20}..."
+          echo "TELEGRAM_CHAT_ID: $TELEGRAM_CHAT_ID"
+          python scripts/market_broadcast_hourly_v2.py --once
