@@ -346,15 +346,13 @@ def send_telegram_message(bot_token: str, chat_id: str, content: str):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         
-        # 将内容转换为HTML格式，保持基本格式
-        html_content = content.replace('**', '<b>').replace('**', '</b>')
-        # 修复HTML标签配对问题
-        html_content = html_content.replace('<b>', '<b>').replace('<b>', '</b>')
+        # 简化消息格式，避免HTML解析问题
+        # 移除所有HTML标签，使用纯文本格式
+        clean_content = content.replace('**', '').replace('<b>', '').replace('</b>', '')
         
         payload = {
             "chat_id": chat_id,
-            "text": html_content,
-            "parse_mode": "HTML",
+            "text": clean_content,
             "disable_web_page_preview": True
         }
         
