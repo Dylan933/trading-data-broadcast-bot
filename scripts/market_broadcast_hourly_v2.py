@@ -249,24 +249,38 @@ def calculate_hemisphere_stats(data: Dict[str, List[float]], hours: int = 12) ->
         # 修复：正确访问字典中的列表数据
         closes = data.get("closes", [])
         volumes = data.get("volumes", [])
+        quote_volumes = data.get("quote_volumes", [])  # 使用quote_volumes作为USDT交易量
         
-        if len(closes) < hours or len(volumes) < hours:
+        if len(closes) < hours:
+            print(f"[WARN] 价格数据不足: {len(closes)} < {hours}")
             return {"volume": 0.0, "volatility": 0.0}
         
         # 获取最近12小时数据
         recent_closes = closes[-hours:]
-        recent_volumes = volumes[-hours:]
         
-        # 计算交易量（USDT）
-        total_volume = sum(recent_volumes)
+        # 计算交易量（优先使用quote_volumes，即USDT交易量）
+        total_volume = 0.0
+        if quote_volumes and len(quote_volumes) >= hours:
+            recent_quote_volumes = quote_volumes[-hours:]
+            total_volume = sum(recent_quote_volumes)
+            print(f"[DEBUG] 使用quote_volumes计算交易量: {total_volume:,.0f}")
+        elif volumes and len(volumes) >= hours:
+            recent_volumes = volumes[-hours:]
+            # 使用最新价格估算USDT交易量
+            latest_price = recent_closes[-1] if recent_closes else 1
+            total_volume = sum(recent_volumes) * latest_price
+            print(f"[DEBUG] 使用volumes*price估算交易量: {total_volume:,.0f}")
+        else:
+            print(f"[WARN] 交易量数据不足，使用默认值")
         
         # 计算波动率（价格标准差）
+        volatility = 0.0
         if len(recent_closes) > 1:
             returns = [(recent_closes[i] / recent_closes[i-1] - 1) for i in range(1, len(recent_closes))]
-            volatility = (sum(r**2 for r in returns) / len(returns)) ** 0.5 * 100
-        else:
-            volatility = 0.0
+            if returns:
+                volatility = (sum(r**2 for r in returns) / len(returns)) ** 0.5 * 100
         
+        print(f"[DEBUG] 半球统计结果: volume={total_volume:,.0f}, volatility={volatility:.2f}%")
         return {"volume": total_volume, "volatility": volatility}
     except Exception as e:
         print(f"[ERROR] 计算半球统计数据失败: {e}")
@@ -278,38 +292,41 @@ def calculate_relative_strength(pairs: List[Tuple[str, str]], data_map: Dict[str
     try:
         results = []
         for base_sym, quote_sym in pairs:
+            base_name = base_sym.replace("USDT", "")
+            quote_name = quote_sym.replace("USDT", "")
+            
             if base_sym in data_map and quote_sym in data_map:
                 base_closes = data_map[base_sym].get("closes", [])
                 quote_closes = data_map[quote_sym].get("closes", [])
                 
                 if len(base_closes) >= 24 and len(quote_closes) >= 24:
-                    # 计算24小时相对强弱
-                    base_change = (base_closes[-1] / base_closes[-24] - 1) * 100
-                    quote_change = (quote_closes[-1] / quote_closes[-24] - 1) * 100
-                    relative_strength = base_change - quote_change
-                    
-                    base_name = base_sym.replace("USDT", "")
-                    quote_name = quote_sym.replace("USDT", "")
-                    
-                    if relative_strength > 0:
-                        stronger = base_name
-                        results.append(f"- {base_name}/{quote_name}：+{relative_strength:.1f}%（{stronger}相对强势）")
-                    else:
-                        stronger = quote_name
-                        results.append(f"- {base_name}/{quote_name}：{relative_strength:.1f}%（{stronger}相对强势）")
+                    try:
+                        # 计算24小时相对强弱
+                        base_change = (base_closes[-1] / base_closes[-24] - 1) * 100
+                        quote_change = (quote_closes[-1] / quote_closes[-24] - 1) * 100
+                        relative_strength = base_change - quote_change
+                        
+                        if relative_strength > 0:
+                            stronger = base_name
+                            results.append(f"- {base_name}/{quote_name}：+{relative_strength:.1f}%（{stronger}相对强势）")
+                        else:
+                            stronger = quote_name
+                            results.append(f"- {base_name}/{quote_name}：{relative_strength:.1f}%（{stronger}相对强势）")
+                    except (ZeroDivisionError, IndexError) as e:
+                        print(f"[WARN] {base_name}/{quote_name}计算失败: {e}")
+                        results.append(f"- {base_name}/{quote_name}：计算错误")
                 else:
-                    base_name = base_sym.replace("USDT", "")
-                    quote_name = quote_sym.replace("USDT", "")
                     results.append(f"- {base_name}/{quote_name}：数据不足")
             else:
-                base_name = base_sym.replace("USDT", "")
-                quote_name = quote_sym.replace("USDT", "")
                 results.append(f"- {base_name}/{quote_name}：数据缺失")
         
-        return "💪 相对强弱：\n" + "\n".join(results) if results else ""
+        if results:
+            return "💪 相对强弱：\n" + "\n".join(results)
+        else:
+            return "💪 相对强弱：\n- ETH/BTC：数据缺失\n- BNB/ETH：数据缺失"
     except Exception as e:
-        print(f"[ERROR] 计算相对强弱失败: {e}")
-        return ""
+        print(f"[ERROR] 相对强弱分析失败: {e}")
+        return "💪 相对强弱：\n- ETH/BTC：数据缺失\n- BNB/ETH：数据缺失"
 
 
 def send_lark_message(webhook_url: str, content: str):
@@ -374,7 +391,8 @@ def send_telegram_message(bot_token: str, chat_id: str, content: str):
 def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None, telegram_bot_token: str | None = None, telegram_chat_id: str | None = None):
     """执行一次播报"""
     try:
-        print(f"[INFO] 开始播报 - {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} UTC+8")
+        now_cn = datetime.now(timezone(timedelta(hours=8)))
+        print(f"[INFO] 开始播报 - {now_cn.strftime('%Y-%m-%d %H:%M:%S')} UTC+8")
         
         # 获取所有数据
         data_map = {}
@@ -386,19 +404,27 @@ def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None, teleg
                 print(f"[ERROR] 获取{symbol}数据失败: {e}")
         
         # 生成基础技术分析
-        messages = []
+        basic_messages = []
         for symbol in symbols:
             if symbol in data_map:
                 try:
                     analysis = format_basic_analysis(symbol, data_map[symbol])
-                    messages.append(analysis)
+                    basic_messages.append(analysis)
                     print(f"[INFO] {symbol}技术分析完成")
                 except Exception as e:
                     print(f"[ERROR] {symbol}技术分析失败: {e}")
         
+        # 构建完整消息
+        all_messages = []
+        
+        # 添加播报标题和时间
+        now_str = now_cn.strftime('%Y-%m-%d %H:%M')
+        title = f"🕐 市场播报 ({now_str} UTC+8)"
+        all_messages.append(title)
+        
         # 检查是否需要增强播报
-        now_cn = datetime.now(timezone(timedelta(hours=8)))
-        if now_cn.hour in [12, 0]:
+        is_enhanced_time = now_cn.hour in [12, 0]
+        if is_enhanced_time:
             print(f"[INFO] 执行增强播报 - {now_cn.hour}:00 UTC+8")
             
             # 半球时段描述
@@ -407,7 +433,7 @@ def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None, teleg
             else:
                 period_desc = "🌍 西半球时段数据播报 (12:00-24:00 UTC+8)"
             
-            enhanced_messages = [period_desc]
+            all_messages.append(period_desc)
             
             # 半球时段统计
             hemisphere_stats = []
@@ -416,59 +442,73 @@ def run_broadcast(symbols: List[str], lark_webhook_url: str | None = None, teleg
                     try:
                         stats = calculate_hemisphere_stats(data_map[symbol])
                         base_name = symbol.replace("USDT", "")
-                        stat_msg = f"- {base_name} 交易量：{stats['volume']:,.0f} USDT，波动率：{stats['volatility']:.2f}%"
+                        # 修复数据格式化问题
+                        volume_str = f"{stats['volume']:,.0f}" if stats['volume'] > 0 else "数据缺失"
+                        volatility_str = f"{stats['volatility']:.2f}%" if stats['volatility'] > 0 else "数据缺失"
+                        stat_msg = f"- {base_name} 交易量：{volume_str} USDT，波动率：{volatility_str}"
                         hemisphere_stats.append(stat_msg)
+                        print(f"[INFO] {symbol}半球统计完成: 交易量={stats['volume']}, 波动率={stats['volatility']}")
                     except Exception as e:
                         print(f"[ERROR] {symbol}半球统计失败: {e}")
+                        base_name = symbol.replace("USDT", "")
+                        hemisphere_stats.append(f"- {base_name} 交易量：数据缺失 USDT，波动率：数据缺失")
+                else:
+                    base_name = symbol.replace("USDT", "")
+                    hemisphere_stats.append(f"- {base_name} 交易量：数据缺失 USDT，波动率：数据缺失")
             
             if hemisphere_stats:
-                enhanced_messages.append("📊 过去12小时统计：")
-                enhanced_messages.extend(hemisphere_stats)
+                all_messages.append("📊 过去12小时统计：")
+                all_messages.extend(hemisphere_stats)
             
             # 恐惧贪婪指数
             try:
                 fear_greed = fetch_fear_greed_index()
                 if fear_greed:
                     fgi_msg = f"😨 恐惧贪婪指数：{fear_greed['value']} ({fear_greed['classification']}，更新于 {fear_greed['updated']})"
-                    enhanced_messages.append(fgi_msg)
+                    all_messages.append(fgi_msg)
                     print("[INFO] 恐惧贪婪指数获取成功")
+                else:
+                    all_messages.append("😨 恐惧贪婪指数：数据获取失败")
+                    print("[WARN] 恐惧贪婪指数数据为空")
             except Exception as e:
                 print(f"[ERROR] 恐惧贪婪指数获取失败: {e}")
+                all_messages.append("😨 恐惧贪婪指数：数据获取失败")
             
             # 相对强弱分析
             try:
                 pairs = []
-                if {"ETHUSDT", "BTCUSDT"}.issubset(set(symbols)):
+                available_symbols = set(data_map.keys())
+                if {"ETHUSDT", "BTCUSDT"}.issubset(available_symbols):
                     pairs.append(("ETHUSDT", "BTCUSDT"))
-                if {"BNBUSDT", "ETHUSDT"}.issubset(set(symbols)):
+                if {"BNBUSDT", "ETHUSDT"}.issubset(available_symbols):
                     pairs.append(("BNBUSDT", "ETHUSDT"))
                 
-                if pairs:
-                    relative_strength = calculate_relative_strength(pairs, data_map)
-                    if relative_strength:
-                        enhanced_messages.append(relative_strength)
-                        print("[INFO] 相对强弱分析完成")
+                relative_strength = calculate_relative_strength(pairs, data_map)
+                all_messages.append(relative_strength)
+                print("[INFO] 相对强弱分析完成")
             except Exception as e:
                 print(f"[ERROR] 相对强弱分析失败: {e}")
-            
-            # 合并增强消息
-            messages = enhanced_messages + [""] + messages
+                all_messages.append("💪 相对强弱：\n- ETH/BTC：数据缺失\n- BNB/ETH：数据缺失")
+        
+        # 添加基础技术分析
+        if basic_messages:
+            all_messages.extend(basic_messages)
         
         # 发送到飞书
-        if lark_webhook_url and messages:
+        if lark_webhook_url and all_messages:
             try:
-                now_str = now_cn.strftime('%Y-%m-%d %H:%M')
-                content = f"🕐 市场播报 ({now_str} UTC+8)\n\n" + "\n\n".join(messages)
+                content = "\n\n".join(all_messages)
                 send_lark_message(lark_webhook_url, content)
+                print(f"[INFO] 飞书消息发送完成，内容长度: {len(content)}")
             except Exception as e:
                 print(f"[ERROR] 飞书推送失败: {e}")
         
         # 发送到Telegram
-        if telegram_bot_token and telegram_chat_id and messages:
+        if telegram_bot_token and telegram_chat_id and all_messages:
             try:
-                now_str = now_cn.strftime('%Y-%m-%d %H:%M')
-                content = f"🕐 市场播报 ({now_str} UTC+8)\n\n" + "\n\n".join(messages)
+                content = "\n\n".join(all_messages)
                 send_telegram_message(telegram_bot_token, telegram_chat_id, content)
+                print(f"[INFO] Telegram消息发送完成，内容长度: {len(content)}")
             except Exception as e:
                 print(f"[ERROR] Telegram推送失败: {e}")
         
